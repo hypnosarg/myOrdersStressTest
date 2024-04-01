@@ -1,0 +1,9 @@
+Manifest-Version: 1.0
+Main-Class: Launcher
+Class-Path: olingo-odata2-api-annotation-2.0.11.jar olingo-odata2-core-2
+ .0.12.jar javax.ws.rs-api-2.0-m10.jar olingo-odata2-api-2.0.12.jar comm
+ ons-codec-1.6.jar gson-2.4.jar olingo-odata2-annotation-processor-api-2
+ .0.11.jar olingo-odata2-api-2.0.11.jar httpclient-4.5.4.jar httpcore-4.
+ 4.7.jar commons-logging-1.2.jar commons-codec-1.10.jar olingo-odata2-ap
+ i-2.0.12.jar
+

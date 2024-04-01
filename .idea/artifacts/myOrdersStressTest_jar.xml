@@ -1,0 +1,15 @@
+<component name="ArtifactManager">
+  <artifact name="myOrdersStressTest:jar">
+    <output-path>$PROJECT_DIR$/out/artifacts/myOrdersStressTest_jar</output-path>
+    <root id="root">
+      <element id="archive" name="myOrdersStressTest.jar">
+        <element id="module-output" name="myOrdersStressTest" />
+      </element>
+      <element id="library" level="project" name="apache.olingo.odata2.api.annotation" />
+      <element id="library" level="project" name="apache.olingo.odata2.core" />
+      <element id="library" level="project" name="apache.olingo.odata2.annotation.processor.api" />
+      <element id="library" level="project" name="apache.httpcomponents.httpclient" />
+      <element id="library" level="project" name="apache.olingo.odata2.api" />
+    </root>
+  </artifact>
+</component>
