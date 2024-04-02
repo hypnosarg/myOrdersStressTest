@@ -136,7 +136,7 @@ public class MyOrdersStressTest {
                                 client = new OdataClient(params.serviceUrl, params.user, params.password);
                             }
                             client.enableJson(true);
-                            performSingleDeviceSimulationNew(params.totalUpdatesPerDevice, testCases, client, params.parallelUpdates, readMessagesAndNotes, performReads, deviceNo);
+                            performSingleDeviceSimulationNew(params.totalUpdatesPerDevice, testCases, client, params.parallelUpdates, readMessagesAndNotes, performReads, deviceNo,params.cycles);
                         } catch (Exception e) {
 
                         }
@@ -185,7 +185,7 @@ public class MyOrdersStressTest {
     private static final Semaphore getCases = new Semaphore(1);
 
     private static void performSingleDeviceSimulationNew(int count, MyOrdersTestCases cases, OdataClient client, int parallelUpdates, Boolean readMessagesAndNotes, Boolean fullReads,
-                                                         int deviceNumber) {
+                                                         int deviceNumber, int cycles) {
         ArrayList<Map<String, Object>> allData = new ArrayList<>();
 
         final Map<String, Integer> finalReadResultStats = new HashMap<>();
@@ -194,86 +194,89 @@ public class MyOrdersStressTest {
         finalReadResultStats.put("Total", 0);
         //Here we read hope and message as well as write for each article
         final Semaphore parallelUpdatesSemaphore = new Semaphore(parallelUpdates);
-        CountDownLatch waitForAll = new CountDownLatch(count);
-        for (int i = 0; i < count; i++) {
-            new Thread(() -> {
-                //Randomize the update case to be done
-                int updType = getUpdateType();
-                MyOrdersTestCases.TestData testData = getDataForTest(cases, updType);
-                Map<String, Object> data = client.getPropertiesOfEntitySet("OrderQuantitySet");
-                int oldQuantity = Integer.parseInt(testData.EXISTINGQTY.trim());
-                data.put("Hope", testData.HOPE);
-                data.put("OrderSession", testData.ORDERSESSION);
-                data.put("OrderDate", DateUtils.dateYYYYMMDDHHMMSSToDate(testData.ORDERABLEDATE));
-                data.put("Store", cases.STORE);
-                data.put("Werks", cases.WERKS);
-                data.put("OrderedQuantity", oldQuantity + 1);      //We just increase the quantity by one
-                data.put("OldOrderedQty", oldQuantity);
-                data.put("UpdatedFields", "OrderedQuantity");
-                data.put("Language", "FR");
 
-                try {
-                    parallelUpdatesSemaphore.acquire();
-                } catch (InterruptedException ex) {
-
-                }
-                CyclicBarrier internalAwait = new CyclicBarrier(3);
-                //Adhoc data getter
+        for (int j=0;j < cycles;j++) {
+            CountDownLatch waitForAll = new CountDownLatch(count);
+            for (int i = 0; i < count; i++) {
                 new Thread(() -> {
-                    Map<String, Integer> adHocRes = getAdHocData(client, (String) data.get("Hope"), (String) data.get("Store"), (Date) data.get("OrderDate"), (String) data.get("OrderSession"));
-                    adHocRes.forEach((stat, recordCount) -> {
-                        int total;
+                    //Randomize the update case to be done
+                    int updType = getUpdateType();
+                    MyOrdersTestCases.TestData testData = getDataForTest(cases, updType,false);
+                    Map<String, Object> data = client.getPropertiesOfEntitySet("OrderQuantitySet");
+                    int oldQuantity = Integer.parseInt(testData.EXISTINGQTY.trim());
+                    data.put("Hope", testData.HOPE);
+                    data.put("OrderSession", testData.ORDERSESSION);
+                    data.put("OrderDate", DateUtils.dateYYYYMMDDHHMMSSToDate(testData.ORDERABLEDATE));
+                    data.put("Store", cases.STORE);
+                    data.put("Werks", cases.WERKS);
+                    data.put("OrderedQuantity", oldQuantity + 1);      //We just increase the quantity by one
+                    data.put("OldOrderedQty", oldQuantity);
+                    data.put("UpdatedFields", "OrderedQuantity");
+                    data.put("Language", "FR");
+
+                    try {
+                        parallelUpdatesSemaphore.acquire();
+                    } catch (InterruptedException ex) {
+
+                    }
+                    CyclicBarrier internalAwait = new CyclicBarrier(3);
+                    //Adhoc data getter
+                    new Thread(() -> {
+                        Map<String, Integer> adHocRes = getAdHocData(client, (String) data.get("Hope"), (String) data.get("Store"), (Date) data.get("OrderDate"), (String) data.get("OrderSession"));
+                        adHocRes.forEach((stat, recordCount) -> {
+                            int total;
+                            try {
+                                total = finalReadResultStats.get(stat);
+                            } catch (RuntimeException ex) {
+                                total = 0;
+                            }
+                            finalReadResultStats.put(stat, total + recordCount);
+                        });
+
                         try {
-                            total = finalReadResultStats.get(stat);
-                        } catch (RuntimeException ex) {
-                            total = 0;
+                            internalAwait.await();
+                        } catch (InterruptedException | BrokenBarrierException e) {
+
                         }
-                        finalReadResultStats.put(stat, total + recordCount);
-                    });
+                    }).start();
+                    //Modification thread
+
+                    //Data modification (Stock, Min Rayon, In Assort, In Rao, etc.)
+                    new Thread(() -> {
+                        Map<String, Integer> updateRes = performUpdates(client, data, updType);
+                        updateRes.forEach((stat, recordCount) -> {
+                            int total;
+                            try {
+                                total = finalUpdateResultStats.get(stat);
+                            } catch (RuntimeException ex) {
+                                total = 0;
+                            }
+                            finalUpdateResultStats.put(stat, total + recordCount);
+                        });
+                        try {
+                            internalAwait.await();
+                        } catch (InterruptedException | BrokenBarrierException e) {
+
+                        }
+                    }).start();
 
                     try {
                         internalAwait.await();
                     } catch (InterruptedException | BrokenBarrierException e) {
 
                     }
-                }).start();
-                //Modification thread
 
-                //Data modification (Stock, Min Rayon, In Assort, In Rao, etc.)
-                new Thread(() -> {
-                    Map<String, Integer> updateRes = performUpdates(client, data,updType);
-                    updateRes.forEach((stat, recordCount) -> {
-                        int total;
-                        try {
-                            total = finalUpdateResultStats.get(stat);
-                        } catch (RuntimeException ex) {
-                            total = 0;
-                        }
-                        finalUpdateResultStats.put(stat, total + recordCount);
-                    });
-                    try {
-                        internalAwait.await();
-                    } catch (InterruptedException | BrokenBarrierException e) {
-
-                    }
+                    parallelUpdatesSemaphore.release();
+                    waitForAll.countDown();
                 }).start();
 
-                try {
-                    internalAwait.await();
-                } catch (InterruptedException | BrokenBarrierException e) {
+            }
 
-                }
-
-                parallelUpdatesSemaphore.release();
-                waitForAll.countDown();
-            }).start();
-
-        }
-
-        try {
-            waitForAll.await();
-        } catch (InterruptedException ex) {
-            System.out.println("Device number " + deviceNumber + "Failed! ");
+            try {
+                waitForAll.await();
+            } catch (InterruptedException ex) {
+                System.out.println("Device number " + deviceNumber + "Failed! ");
+            }
         }
 
 
@@ -297,7 +300,7 @@ public class MyOrdersStressTest {
         System.out.println(results[0]);
     }
 
-    private static MyOrdersTestCases.TestData getDataForTest(MyOrdersTestCases cases, int scenario) {
+    private static MyOrdersTestCases.TestData getDataForTest(MyOrdersTestCases cases, int scenario, boolean flagUsed) {
         try {
             //To assure no two threads process the same data
             getCases.acquire();
@@ -310,30 +313,30 @@ public class MyOrdersStressTest {
         switch (scenario) {
             case 1:
                 //Stock
-                testCases = cases.getArticlesForStock(true, 1, true);
+                testCases = cases.getArticlesForStock(flagUsed, 1, true);
                 break;
             case 2:
                 //Min rayon
-                testCases = cases.getArticlesForMinRayon(true, 1, true);
+                testCases = cases.getArticlesForMinRayon(flagUsed, 1, true);
                 break;
             case 3:
                 //In Assort
-                testCases = cases.getArticlesForInAssort(true, 1, true);
+                testCases = cases.getArticlesForInAssort(flagUsed, 1, true);
                 break;
             case 4:
                 //In Rao
-                testCases = cases.getArticlesForUpdate(true, 1, true);
+                testCases = cases.getArticlesForUpdate(flagUsed, 1, true);
                 break;
             default:
                 //Order
-                testCases = cases.getArticlesForCreation(true, 1, true);
+                testCases = cases.getArticlesForCreation(flagUsed, 1, true);
         }
 
 //        updateTestCasesFile(cases);
         getCases.release();
 
         if (testCases == null || testCases.size() == 0) {
-            testCases = cases.getArticlesForCreation(true, 1, true);
+            testCases = cases.getArticlesForCreation(flagUsed, 1, true);
         }
         return testCases.get(0);
 
@@ -522,22 +525,25 @@ public class MyOrdersStressTest {
     }
 
     protected static int getUpdateType() {
-        return 4;
-//        Random rand = new Random();
-//        int chance = rand.nextInt(100);
-//        if (chance > 15) {
-//            return 0; //order is the most likely case
-//        }else{
-//            if (chance < 10){
-//                //Stock
-//            }else if(chance < 12){
-//                //Min Rayon
-//            }else if (chance < 14){
-//                //In Arsort
-//            }else{
-//                //In Rao
-//            }
-//        }
+        Random rand = new Random();
+        int chance = rand.nextInt(100);
+        if (chance > 20) {
+            return 0; //order is the most likely case
+        }else{
+            if (chance < 10){
+                //Stock
+                return 1;
+            }else if(chance < 15){
+                //Min Rayon
+                return 2;
+            }else if (chance < 17){
+                //In Asort
+                return 3;
+            }else{
+                //In Rao
+                return 4;
+            }
+        }
 //        return 0;//Todo remove
     }
 
@@ -611,10 +617,8 @@ public class MyOrdersStressTest {
                 //Order
                 partData.add(data);
                 try {
-                    ArrayList<ODataEntry> newEntries = client.createEntries(OdataClient.APPLICATION_JSON, "OrderQuantitySet", partData, 1);
-                    if (newEntries != null) {
-                        stats.put("OrderQuantities", newEntries.size());
-                    }
+                    client.createEntries(OdataClient.APPLICATION_JSON, "OrderQuantitySet", partData, 1);
+                    stats.put("Orders", 1);
                 } catch (Exception e) {
                 }
         }
