@@ -47,6 +47,17 @@ public class MyOrdersTestCases {
     public ArrayList<TestData> getArticlesForCreation(Boolean flagAsUsed, int qty, boolean randomOrder) {
         return getCasesForScenario("9", flagAsUsed, qty, randomOrder);
     }
+    public ArrayList<TestData> getArticlesForStock(Boolean flagAsUsed, int qty, boolean randomOrder) {
+        return getCasesForScenario("14", flagAsUsed, qty, randomOrder);
+    }
+    public ArrayList<TestData> getArticlesForMinRayon(Boolean flagAsUsed, int qty, boolean randomOrder) {
+        return getCasesForScenario("13", flagAsUsed, qty, randomOrder);
+    }
+
+    public ArrayList<TestData> getArticlesForInAssort(Boolean flagAsUsed, int qty, boolean randomOrder) {
+        return getCasesForScenario("15", flagAsUsed, qty, randomOrder);
+    }
+
 
     public ArrayList<TestData> getCasesForScenario(String scenario, Boolean flagAsUsed, int qty, Boolean randomOrder) {
         ArrayList<TestData> cases = new ArrayList<>();

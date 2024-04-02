@@ -136,7 +136,7 @@ public class MyOrdersStressTest {
                                 client = new OdataClient(params.serviceUrl, params.user, params.password);
                             }
                             client.enableJson(true);
-                            performSingleDeviceSimulation(params.totalUpdatesPerDevice, testCases, client, params.parallelUpdates, readMessagesAndNotes, performReads, deviceNo);
+                            performSingleDeviceSimulationNew(params.totalUpdatesPerDevice, testCases, client, params.parallelUpdates, readMessagesAndNotes, performReads, deviceNo);
                         } catch (Exception e) {
 
                         }
@@ -147,6 +147,7 @@ public class MyOrdersStressTest {
                         }
                     }).start();
                 }
+                updateTestCasesFile(testCases);
             }
             break;
 
@@ -183,8 +184,163 @@ public class MyOrdersStressTest {
 
     private static final Semaphore getCases = new Semaphore(1);
 
+    private static void performSingleDeviceSimulationNew(int count, MyOrdersTestCases cases, OdataClient client, int parallelUpdates, Boolean readMessagesAndNotes, Boolean fullReads,
+                                                         int deviceNumber) {
+        ArrayList<Map<String, Object>> allData = new ArrayList<>();
+
+        final Map<String, Integer> finalReadResultStats = new HashMap<>();
+        finalReadResultStats.put("Total", 0);
+        final Map<String, Integer> finalUpdateResultStats = new HashMap<>();
+        finalReadResultStats.put("Total", 0);
+        //Here we read hope and message as well as write for each article
+        final Semaphore parallelUpdatesSemaphore = new Semaphore(parallelUpdates);
+        CountDownLatch waitForAll = new CountDownLatch(count);
+        for (int i = 0; i < count; i++) {
+            new Thread(() -> {
+                //Randomize the update case to be done
+                int updType = getUpdateType();
+                MyOrdersTestCases.TestData testData = getDataForTest(cases, updType);
+                Map<String, Object> data = client.getPropertiesOfEntitySet("OrderQuantitySet");
+                int oldQuantity = Integer.parseInt(testData.EXISTINGQTY.trim());
+                data.put("Hope", testData.HOPE);
+                data.put("OrderSession", testData.ORDERSESSION);
+                data.put("OrderDate", DateUtils.dateYYYYMMDDHHMMSSToDate(testData.ORDERABLEDATE));
+                data.put("Store", cases.STORE);
+                data.put("Werks", cases.WERKS);
+                data.put("OrderedQuantity", oldQuantity + 1);      //We just increase the quantity by one
+                data.put("OldOrderedQty", oldQuantity);
+                data.put("UpdatedFields", "OrderedQuantity");
+                data.put("Language", "FR");
+
+                try {
+                    parallelUpdatesSemaphore.acquire();
+                } catch (InterruptedException ex) {
+
+                }
+                CyclicBarrier internalAwait = new CyclicBarrier(3);
+                //Adhoc data getter
+                new Thread(() -> {
+                    Map<String, Integer> adHocRes = getAdHocData(client, (String) data.get("Hope"), (String) data.get("Store"), (Date) data.get("OrderDate"), (String) data.get("OrderSession"));
+                    adHocRes.forEach((stat, recordCount) -> {
+                        int total;
+                        try {
+                            total = finalReadResultStats.get(stat);
+                        } catch (RuntimeException ex) {
+                            total = 0;
+                        }
+                        finalReadResultStats.put(stat, total + recordCount);
+                    });
+
+                    try {
+                        internalAwait.await();
+                    } catch (InterruptedException | BrokenBarrierException e) {
+
+                    }
+                }).start();
+                //Modification thread
+
+                //Data modification (Stock, Min Rayon, In Assort, In Rao, etc.)
+                new Thread(() -> {
+                    Map<String, Integer> updateRes = performUpdates(client, data,updType);
+                    updateRes.forEach((stat, recordCount) -> {
+                        int total;
+                        try {
+                            total = finalUpdateResultStats.get(stat);
+                        } catch (RuntimeException ex) {
+                            total = 0;
+                        }
+                        finalUpdateResultStats.put(stat, total + recordCount);
+                    });
+                    try {
+                        internalAwait.await();
+                    } catch (InterruptedException | BrokenBarrierException e) {
+
+                    }
+                }).start();
+
+                try {
+                    internalAwait.await();
+                } catch (InterruptedException | BrokenBarrierException e) {
+
+                }
+
+                parallelUpdatesSemaphore.release();
+                waitForAll.countDown();
+            }).start();
+
+        }
+
+        try {
+            waitForAll.await();
+        } catch (InterruptedException ex) {
+            System.out.println("Device number " + deviceNumber + "Failed! ");
+        }
+
+
+        //Write some logs of the results
+        //String resultsCreate = "Total record updates";
+        String[] results = new String[1];
+        results[0] = ("Device " + deviceNumber + ". Total records read: " + finalReadResultStats.get("Total") + '.');
+        finalReadResultStats.forEach((stat, totalCount) -> {
+            if (!stat.equals("Total")) {
+                results[0] = results[0] + stat + ":  " + totalCount + " ";
+            }
+        });
+        System.out.println(results[0]);
+
+        results[0] = ("Device " + deviceNumber + ". Total updates: " + finalUpdateResultStats.get("Total") + '.');
+        finalUpdateResultStats.forEach((stat, totalCount) -> {
+            if (!stat.equals("Total")) {
+                results[0] = results[0] + stat + ":  " + totalCount + " ";
+            }
+        });
+        System.out.println(results[0]);
+    }
+
+    private static MyOrdersTestCases.TestData getDataForTest(MyOrdersTestCases cases, int scenario) {
+        try {
+            //To assure no two threads process the same data
+            getCases.acquire();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+        ArrayList<MyOrdersTestCases.TestData> testCases = null;
+
+
+        switch (scenario) {
+            case 1:
+                //Stock
+                testCases = cases.getArticlesForStock(true, 1, true);
+                break;
+            case 2:
+                //Min rayon
+                testCases = cases.getArticlesForMinRayon(true, 1, true);
+                break;
+            case 3:
+                //In Assort
+                testCases = cases.getArticlesForInAssort(true, 1, true);
+                break;
+            case 4:
+                //In Rao
+                testCases = cases.getArticlesForUpdate(true, 1, true);
+                break;
+            default:
+                //Order
+                testCases = cases.getArticlesForCreation(true, 1, true);
+        }
+
+//        updateTestCasesFile(cases);
+        getCases.release();
+
+        if (testCases == null || testCases.size() == 0) {
+            testCases = cases.getArticlesForCreation(true, 1, true);
+        }
+        return testCases.get(0);
+
+    }
+
     private static void performSingleDeviceSimulation(int count, MyOrdersTestCases cases, OdataClient client, int parallelUpdates, Boolean readMessagesAndNotes, Boolean fullReads,
-                                              int deviceNumber) {
+                                                      int deviceNumber) {
         //This method will perform <count> orders in parallel under a single session
         try {
             //To assure no two threads process the same data
@@ -216,8 +372,8 @@ public class MyOrdersStressTest {
 
         }
         //Place an orders in parallel
-        final Map<String,Integer> finalReadResultStats = new HashMap<>();
-        finalReadResultStats.put("Total",0);
+        final Map<String, Integer> finalReadResultStats = new HashMap<>();
+        finalReadResultStats.put("Total", 0);
 
         //Here we read hope and message as well as write for each article
         final Semaphore parallelUpdatesSemaphore = new Semaphore(parallelUpdates);
@@ -227,23 +383,23 @@ public class MyOrdersStressTest {
             partData.add(data);
             try {
                 parallelUpdatesSemaphore.acquire();
-            }catch (InterruptedException ex){
+            } catch (InterruptedException ex) {
                 continue;
             }
             new Thread(() -> {
                 CyclicBarrier internalAwait = new CyclicBarrier(3);
                 //Adhoc data getter
                 new Thread(() -> {
-                    Map<String,Integer>  adHocRes = getAdHocData(client, (String) data.get("Hope"), (String) data.get("Store"), (Date) data.get("OrderDate"), (String) data.get("OrderSession"));
+                    Map<String, Integer> adHocRes = getAdHocData(client, (String) data.get("Hope"), (String) data.get("Store"), (Date) data.get("OrderDate"), (String) data.get("OrderSession"));
                     adHocRes.forEach((stat, recordCount) -> {
                         int total;
                         try {
-                             total = finalReadResultStats.get(stat);
-                        }catch(RuntimeException ex){
+                            total = finalReadResultStats.get(stat);
+                        } catch (RuntimeException ex) {
                             total = 0;
                         }
-                        finalReadResultStats.put(stat,total + recordCount);
-                    } );
+                        finalReadResultStats.put(stat, total + recordCount);
+                    });
 
                     try {
                         internalAwait.await();
@@ -254,23 +410,23 @@ public class MyOrdersStressTest {
                 //Modification thread
 
                 //Data modification (Stock, Min Rayon, In Assort, In Rao, etc.)
-                    new Thread(() -> {
-                        Map<String,Integer>  updateRes = performUpdates(client,data);
-                        updateRes.forEach((stat, recordCount) -> {
-                            int total;
-                            try {
-                                total = finalReadResultStats.get(stat);
-                            }catch(RuntimeException ex){
-                                total = 0;
-                            }
-                            finalReadResultStats.put(stat,total + recordCount);
-                        } );
+                new Thread(() -> {
+                    Map<String, Integer> updateRes = performUpdates(client, data);
+                    updateRes.forEach((stat, recordCount) -> {
+                        int total;
                         try {
-                            internalAwait.await();
-                        } catch (InterruptedException | BrokenBarrierException e) {
-
+                            total = finalReadResultStats.get(stat);
+                        } catch (RuntimeException ex) {
+                            total = 0;
                         }
-                   }).start();
+                        finalReadResultStats.put(stat, total + recordCount);
+                    });
+                    try {
+                        internalAwait.await();
+                    } catch (InterruptedException | BrokenBarrierException e) {
+
+                    }
+                }).start();
 
                 try {
                     internalAwait.await();
@@ -286,7 +442,7 @@ public class MyOrdersStressTest {
 
         try {
             waitForAll.await();
-        }catch (InterruptedException ex){
+        } catch (InterruptedException ex) {
             System.out.println("Device number " + deviceNumber + "Failed! ");
         }
 
@@ -295,11 +451,11 @@ public class MyOrdersStressTest {
         //String resultsCreate = "Total record updates";
         String[] resultsRead = new String[1];
         resultsRead[0] = ("Device " + deviceNumber + "Total records read: " + finalReadResultStats.get("Total") + '.');
-        finalReadResultStats.forEach((stat, totalCount) ->{
-            if (!stat.equals("Total")){
-                resultsRead[0]  = resultsRead[0] + stat + ":  " + totalCount + " ";
+        finalReadResultStats.forEach((stat, totalCount) -> {
+            if (!stat.equals("Total")) {
+                resultsRead[0] = resultsRead[0] + stat + ":  " + totalCount + " ";
             }
-        } );
+        });
         System.out.println(resultsRead[0]);
     }
 
@@ -365,8 +521,8 @@ public class MyOrdersStressTest {
         return feed.getEntries();
     }
 
-    protected static int getUpdateType(Map<String, Object> data ){
-        return 1;
+    protected static int getUpdateType() {
+        return 4;
 //        Random rand = new Random();
 //        int chance = rand.nextInt(100);
 //        if (chance > 15) {
@@ -384,30 +540,32 @@ public class MyOrdersStressTest {
 //        }
 //        return 0;//Todo remove
     }
-    private static void updateOrderDetails(OdataClient client, Map<String, Object> data, String field){
-        Map<String, Object> entityData =  client.getPropertiesOfEntitySet("OrderDetailsSet");
+
+    private static void updateOrderDetails(OdataClient client, Map<String, Object> data, String field) {
+        Map<String, Object> entityData = client.getPropertiesOfEntitySet("OrderDetailsSet");
         entityData.put("UpdatedFields", field);
         entityData.put("Language", "FR");
         entityData.put("Hope", data.get("Hope"));
         entityData.put("Store", data.get("Store"));
         entityData.put("Werks", data.get("Werks"));
-        entityData.put("OldStock",0);
-        entityData.put("Stock",1);
-        entityData.put("MinRayon",1);
-        entityData.put("OldMinRayon",0);
+        entityData.put("OldStock", 0);
+        entityData.put("Stock", 1);
+        entityData.put("MinRayon", 1);
+        entityData.put("OldMinRayon", 0);
         String id = "Store='".concat(String.valueOf(data.get("Store"))).concat("',")
                 .concat("Hope='").concat(String.valueOf(data.get("Hope"))).concat("'");
 
         ArrayList<Map<String, Object>> partData = new ArrayList<>();
         partData.add(entityData);
         try {
-            client.updateEntries(OdataClient.APPLICATION_JSON,"OrderDetailsSet",partData,1,id);
+            client.updateEntries(OdataClient.APPLICATION_JSON, "OrderDetailsSet", partData, 1, id);
         } catch (Exception e) {
 
         }
     }
-    private static void updateArticle(OdataClient client, Map<String, Object> data, String field, Boolean value){
-        Map<String, Object> entityData =  client.getPropertiesOfEntitySet("ArticleSet");
+
+    private static void updateArticle(OdataClient client, Map<String, Object> data, String field, Boolean value) {
+        Map<String, Object> entityData = client.getPropertiesOfEntitySet("ArticleSet");
         entityData.put("UpdatedFields", field);
         entityData.put(field, value);
         entityData.put("Language", "FR");
@@ -420,46 +578,54 @@ public class MyOrdersStressTest {
         ArrayList<Map<String, Object>> partData = new ArrayList<>();
         partData.add(entityData);
         try {
-            client.updateEntries(OdataClient.APPLICATION_JSON,"ArticleSet",partData,1,id);
+            client.updateEntries(OdataClient.APPLICATION_JSON, "ArticleSet", partData, 1, id);
         } catch (Exception e) {
 
         }
     }
-    private static Map<String,Integer>    performUpdates(OdataClient client, Map<String, Object> data ){
-        Map<String,Integer> stats = new HashMap<>();
+    private static Map<String, Integer> performUpdates(OdataClient client, Map<String, Object> data, int updType) {
+        Map<String, Integer> stats = new HashMap<>();
         ArrayList<Map<String, Object>> partData = new ArrayList<>();
-
-        switch (getUpdateType(data)){
+        switch (updType) {
             case 1:
-                 //Stock
-                updateOrderDetails(client,data,"Stock");
+                //Stock
+                updateOrderDetails(client, data, "Stock");
+                stats.put("Stock", 1);
                 break;
             case 2:
                 //Min rayon
-                updateOrderDetails(client,data,"MinRayon");
+                updateOrderDetails(client, data, "MinRayon");
+                stats.put("MinRayon", 1);
                 break;
             case 3:
                 //In Assort
-                updateArticle(client,data,"InAssortment",true);
+                updateArticle(client, data, "InAssortment", true);
+                stats.put("InAssortment", 1);
                 break;
             case 4:
                 //In Rao
-                updateArticle(client,data,"InRao",true);
+                updateArticle(client, data, "InRao", true);
+                stats.put("InRao", 1);
                 break;
             default:
-                 //Order
+                //Order
                 partData.add(data);
                 try {
                     ArrayList<ODataEntry> newEntries = client.createEntries(OdataClient.APPLICATION_JSON, "OrderQuantitySet", partData, 1);
                     if (newEntries != null) {
-                        stats.put("OrderQuantities",newEntries.size());
+                        stats.put("OrderQuantities", newEntries.size());
                     }
-                } catch (Exception e) { }
+                } catch (Exception e) {
+                }
         }
-
+        stats.put("Total", 1);
         return stats;
     }
-    private static Map<String,Integer>  getAdHocData(OdataClient client, String hope, String store, Date orderDate, String session) {
+    private static Map<String, Integer> performUpdates(OdataClient client, Map<String, Object> data) {
+        return performUpdates(client,data,getUpdateType());
+    }
+
+    private static Map<String, Integer> getAdHocData(OdataClient client, String hope, String store, Date orderDate, String session) {
         final ArrayList<ODataEntry> readMessages = new ArrayList<>();
         final ArrayList<ODataEntry> readNotes = new ArrayList<>();
         final ArrayList<ODataEntry> readSales = new ArrayList<>();
@@ -481,11 +647,11 @@ public class MyOrdersStressTest {
             internalAwait.countDown();
         }).start();
         int total = readMessages.size() + readNotes.size() + readPredictedOrders.size();
-        Map<String,Integer> stats = new HashMap<>();
-        stats.put("Total",total);
-        stats.put("Notes",readNotes.size());
-        stats.put("Messages",readMessages.size());
-        stats.put("Predicted",readPredictedOrders.size());
+        Map<String, Integer> stats = new HashMap<>();
+        stats.put("Total", total);
+        stats.put("Notes", readNotes.size());
+        stats.put("Messages", readMessages.size());
+        stats.put("Predicted", readPredictedOrders.size());
 //        //If mixed case was selected, also select some extra info on the article
 //        if (fullReads) {
 //            new Thread(() -> {
