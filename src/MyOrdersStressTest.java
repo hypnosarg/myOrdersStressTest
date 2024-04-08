@@ -10,12 +10,10 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.net.URISyntaxException;
 import java.util.*;
-import java.util.concurrent.BrokenBarrierException;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.CyclicBarrier;
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
+import java.util.logging.Handler;
 
 public class MyOrdersStressTest {
     /**
@@ -31,6 +29,7 @@ public class MyOrdersStressTest {
      */
     public static final String FOLDER_AND_FILE = "\\testCases\\myordersmobiletests.json";
     public static final String FOLDER_AND_FILE_TOKEN = "\\testCases\\tokens.json";
+    public static final String FOLDER_AND_FILE_SYNC = "\\testCases\\device_#\\tech_download_volatile.BAT";
     public static final String EMPTY_MODIFICATION_TST = "0 ";
     private static final int DEVICES_PER_STORE = 5;
     private static final int MAX_PARALLEL_UPDATES = 4;
@@ -183,6 +182,46 @@ public class MyOrdersStressTest {
     }
 
     private static final Semaphore getCases = new Semaphore(1);
+    protected static final int SYNCHRO_RELEASE_DELAY = 30;
+    protected static final int MAX_SYNCS = 1;
+     protected static ArrayList<Boolean> synchroSlots = new ArrayList<>(MAX_SYNCS);
+     final static ScheduledThreadPoolExecutor releaseExecutor = new ScheduledThreadPoolExecutor(MAX_SYNCS);
+    private static void peformSynchronization(){
+        String path = getCurrentDirectory().concat(FOLDER_AND_FILE_SYNC);
+        //Get a device that is ready;
+        //Find a slot
+        int deviceNo = 1;
+        for ( deviceNo=1;deviceNo <= MAX_SYNCS;deviceNo++){
+
+          try {
+              Boolean available = synchroSlots.get(deviceNo-1);
+              if (available) {
+                  synchroSlots.set(deviceNo - 1, false);
+                  break;
+              }
+          } catch (RuntimeException ex){
+              synchroSlots.add(deviceNo - 1, false);
+              break;
+          }
+        }
+
+        path = path.replace("#",String.valueOf(deviceNo));
+        path = "cmd /c start ".concat(path);
+        try {
+            Runtime.
+                    getRuntime().
+                    exec(path);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        //Wait 30 seconds to release the sync slot
+        final int releaseSlot = deviceNo - 1;
+        releaseExecutor.schedule(()->{
+            synchroSlots.set(releaseSlot, false);
+        },SYNCHRO_RELEASE_DELAY,TimeUnit.SECONDS);
+        return;
+
+    }
 
     private static void performSingleDeviceSimulationNew(int count, MyOrdersTestCases cases, OdataClient client, int parallelUpdates, Boolean readMessagesAndNotes, Boolean fullReads,
                                                          int deviceNumber, int cycles) {
@@ -194,6 +233,7 @@ public class MyOrdersStressTest {
         finalReadResultStats.put("Total", 0);
         //Here we read hope and message as well as write for each article
         final Semaphore parallelUpdatesSemaphore = new Semaphore(parallelUpdates);
+        peformSynchronization();
 
         for (int j=0;j < cycles;j++) {
             CountDownLatch waitForAll = new CountDownLatch(count);
