@@ -9,6 +9,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.net.URISyntaxException;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
@@ -135,7 +136,7 @@ public class MyOrdersStressTest {
                                 client = new OdataClient(params.serviceUrl, params.user, params.password);
                             }
                             client.enableJson(true);
-                            performSingleDeviceSimulationNew(params.totalUpdatesPerDevice, testCases, client, params.parallelUpdates, readMessagesAndNotes, performReads, deviceNo,params.cycles);
+                            performSingleDeviceSimulationNew(params.totalUpdatesPerDevice, testCases, client, params.parallelUpdates, readMessagesAndNotes, performReads, deviceNo,params.cycles,params.activeDeviceCount);
                         } catch (Exception e) {
 
                         }
@@ -222,9 +223,59 @@ public class MyOrdersStressTest {
         return;
 
     }
+    private static final double SYNC_INTERVAL_MINS = 10;
+    private static final int SECONDS_SYNC_CHECK = 5;
+    private static final double SYNCS_PERDEVICE_PER_MINUTE =1d / SYNC_INTERVAL_MINS;
+    private static int noSyncChecks = 0;
+    private static LocalDateTime lastSync = null;
+    private static LocalDateTime lastSyncCheck = null;
+    protected static boolean triggerSynchroNeeded(int activeDevices){
+        //We check only once every N seconds
+        if (lastSyncCheck != null && !LocalDateTime.now().isAfter(lastSyncCheck.plusSeconds(SECONDS_SYNC_CHECK))){
+            return false;
+        }
+        lastSyncCheck = LocalDateTime.now();
+        //First check that there are sync slots available
+        if (synchroSlots != null && synchroSlots.size() == MAX_SYNCS ){
+            Boolean avail = false;
+            for (Boolean inAvail:synchroSlots){
+                avail = inAvail;
+                if (avail){
+                    break;
+                }
+            }
+            if (!avail){
+                return false;
+            }
+        }
+        //Some slots are available? then based on probability
+        //indicate if a sync will be needed
+
+        //Determine the chance of a sync given the check interval
+        double checksPerMinute = Math.divideExact(60,SECONDS_SYNC_CHECK);
+        //Calculate chance per each check
+        double chancePerCheck = activeDevices * SYNCS_PERDEVICE_PER_MINUTE / checksPerMinute;
+        //And now adjust the chance taking into account how many previous failed checks
+        //we had (eventually chance converges to 100%)
+        double currentChance = noSyncChecks != 0 ? chancePerCheck * noSyncChecks:chancePerCheck;
+        //Convert to percentage
+        currentChance = currentChance * 100;
+        //And roll the dice!
+        Random rand = new Random();
+        int dice = rand.nextInt(100);
+        if (dice < currentChance){
+            noSyncChecks = 0;
+            lastSync = LocalDateTime.now();
+            return true;
+        }else{
+            noSyncChecks++;
+            return false;
+        }
+
+    }
 
     private static void performSingleDeviceSimulationNew(int count, MyOrdersTestCases cases, OdataClient client, int parallelUpdates, Boolean readMessagesAndNotes, Boolean fullReads,
-                                                         int deviceNumber, int cycles) {
+                                                         int deviceNumber, int cycles, int totalDevices) {
         ArrayList<Map<String, Object>> allData = new ArrayList<>();
 
         final Map<String, Integer> finalReadResultStats = new HashMap<>();
@@ -233,11 +284,14 @@ public class MyOrdersStressTest {
         finalReadResultStats.put("Total", 0);
         //Here we read hope and message as well as write for each article
         final Semaphore parallelUpdatesSemaphore = new Semaphore(parallelUpdates);
-        peformSynchronization();
 
         for (int j=0;j < cycles;j++) {
             CountDownLatch waitForAll = new CountDownLatch(count);
             for (int i = 0; i < count; i++) {
+                //Randomly trigger synchronizations
+                if (triggerSynchroNeeded(totalDevices)){
+                    peformSynchronization();
+                }
                 new Thread(() -> {
                     //Randomize the update case to be done
                     int updType = getUpdateType();
