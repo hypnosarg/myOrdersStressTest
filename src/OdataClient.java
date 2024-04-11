@@ -473,7 +473,7 @@ public class OdataClient {
                         addEntries.release();
                     }
                 } catch (Exception e) {
-                    throw new RuntimeException(e);
+                  //  throw new RuntimeException(e);
                 }
                 if (connection != null)
                     connection.disconnect();

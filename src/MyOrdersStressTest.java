@@ -184,10 +184,17 @@ public class MyOrdersStressTest {
 
     private static final Semaphore getCases = new Semaphore(1);
     protected static final int SYNCHRO_RELEASE_DELAY = 30;
-    protected static final int MAX_SYNCS = 1;
+    protected static final int MAX_SYNCS = 3;
      protected static ArrayList<Boolean> synchroSlots = new ArrayList<>(MAX_SYNCS);
      final static ScheduledThreadPoolExecutor releaseExecutor = new ScheduledThreadPoolExecutor(MAX_SYNCS);
+     final static ScheduledThreadPoolExecutor syncStartDelayer = new ScheduledThreadPoolExecutor(1);
+     final static Semaphore startSyncSem = new Semaphore(1);
     private static void peformSynchronization(){
+        try {
+            startSyncSem.acquire();
+        } catch (InterruptedException e) {
+            return;
+        }
         String path = getCurrentDirectory().concat(FOLDER_AND_FILE_SYNC);
         //Get a device that is ready;
         //Find a slot
@@ -220,7 +227,11 @@ public class MyOrdersStressTest {
         releaseExecutor.schedule(()->{
             synchroSlots.set(releaseSlot, false);
         },SYNCHRO_RELEASE_DELAY,TimeUnit.SECONDS);
-        return;
+        syncStartDelayer.schedule(()->{
+                startSyncSem.release();
+        },1,TimeUnit.SECONDS);
+
+
 
     }
     private static final double SYNC_INTERVAL_MINS = 10;
@@ -284,7 +295,12 @@ public class MyOrdersStressTest {
         finalReadResultStats.put("Total", 0);
         //Here we read hope and message as well as write for each article
         final Semaphore parallelUpdatesSemaphore = new Semaphore(parallelUpdates);
-
+        //TODO remove test (Start)
+        peformSynchronization();
+        if (1 < 2){
+            return;
+        }
+        //TODO remove test (End)
         for (int j=0;j < cycles;j++) {
             CountDownLatch waitForAll = new CountDownLatch(count);
             for (int i = 0; i < count; i++) {
@@ -566,7 +582,7 @@ public class MyOrdersStressTest {
             filters.put("Language", "FR");
             feed = client.readFeed("ItemSalesSet", filters);
         } catch (IOException | ODataException e) {
-            return null;
+            return new ArrayList<>();
         }
         return feed.getEntries();
     }
@@ -581,7 +597,7 @@ public class MyOrdersStressTest {
             filters.put("Date", orderDate);
             feed = client.readFeed("PredictedOrderSet", filters);
         } catch (IOException | ODataException e) {
-            return null;
+            return new ArrayList<>();
         }
         return feed.getEntries();
     }
@@ -597,7 +613,7 @@ public class MyOrdersStressTest {
             filters.put("Language", "FR");
             feed = client.readFeed("HopeMessagesSet", filters);
         } catch (IOException | ODataException e) {
-            return null;
+            return new ArrayList<>();
         }
         return feed.getEntries();
     }
@@ -613,7 +629,7 @@ public class MyOrdersStressTest {
             filters.put("OrderSession", session);
             feed = client.readFeed("NoteSet", filters);
         } catch (IOException | ODataException e) {
-            return null;
+            return new ArrayList<>();
         }
         return feed.getEntries();
     }
