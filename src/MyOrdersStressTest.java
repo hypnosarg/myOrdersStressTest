@@ -30,11 +30,13 @@ public class MyOrdersStressTest {
      */
     public static final String FOLDER_AND_FILE = "\\testCases\\myordersmobiletests.json";
     public static final String FOLDER_AND_FILE_TOKEN = "\\testCases\\tokens.json";
+    public static final String FOLDER_AND_FILE_CONFIG = "\\testCases\\config.json";
     public static final String FOLDER_AND_FILE_SYNC = "\\testCases\\device_#\\tech_download_volatile.BAT";
     public static final String EMPTY_MODIFICATION_TST = "0 ";
     private static final int DEVICES_PER_STORE = 5;
     private static final int MAX_PARALLEL_UPDATES = 4;
     private static TokensFile tokens = null;
+    private static ConfigsFile config = null;
 
     protected static class Parameters {
         public String user = "";
@@ -118,6 +120,8 @@ public class MyOrdersStressTest {
             }
         }
 
+        config = readConfigFile();
+
 
         CyclicBarrier mainThreadsBarrier = new CyclicBarrier(params.activeDeviceCount + 1);
         switch (params.scenario) {
@@ -184,9 +188,8 @@ public class MyOrdersStressTest {
 
     private static final Semaphore getCases = new Semaphore(1);
     protected static final int SYNCHRO_RELEASE_DELAY = 30;
-    protected static final int MAX_SYNCS = 3;
-     protected static ArrayList<Boolean> synchroSlots = new ArrayList<>(MAX_SYNCS);
-     final static ScheduledThreadPoolExecutor releaseExecutor = new ScheduledThreadPoolExecutor(MAX_SYNCS);
+    protected static ArrayList<Boolean> synchroSlotsN;
+    protected static ScheduledThreadPoolExecutor releaseExecutorN;
      final static ScheduledThreadPoolExecutor syncStartDelayer = new ScheduledThreadPoolExecutor(1);
      final static Semaphore startSyncSem = new Semaphore(1);
     private static void peformSynchronization(){
@@ -195,20 +198,26 @@ public class MyOrdersStressTest {
         } catch (InterruptedException e) {
             return;
         }
+
+        if (synchroSlotsN == null || releaseExecutorN == null ) {
+            synchroSlotsN = new ArrayList<>(config.max_syncs);
+            releaseExecutorN = new ScheduledThreadPoolExecutor(config.max_syncs);
+        }
+
         String path = getCurrentDirectory().concat(FOLDER_AND_FILE_SYNC);
         //Get a device that is ready;
         //Find a slot
         int deviceNo = 1;
-        for ( deviceNo=1;deviceNo <= MAX_SYNCS;deviceNo++){
+        for ( deviceNo=1;deviceNo <= config.max_syncs;deviceNo++){
 
           try {
-              Boolean available = synchroSlots.get(deviceNo-1);
+              Boolean available = synchroSlotsN.get(deviceNo-1);
               if (available) {
-                  synchroSlots.set(deviceNo - 1, false);
+                  synchroSlotsN.set(deviceNo - 1, false);
                   break;
               }
           } catch (RuntimeException ex){
-              synchroSlots.add(deviceNo - 1, false);
+              synchroSlotsN.add(deviceNo - 1, false);
               break;
           }
         }
@@ -224,8 +233,8 @@ public class MyOrdersStressTest {
         }
         //Wait 30 seconds to release the sync slot
         final int releaseSlot = deviceNo - 1;
-        releaseExecutor.schedule(()->{
-            synchroSlots.set(releaseSlot, false);
+        releaseExecutorN.schedule(()->{
+            synchroSlotsN.set(releaseSlot, false);
         },SYNCHRO_RELEASE_DELAY,TimeUnit.SECONDS);
         syncStartDelayer.schedule(()->{
                 startSyncSem.release();
@@ -234,22 +243,23 @@ public class MyOrdersStressTest {
 
 
     }
-    private static final double SYNC_INTERVAL_MINS = 10;
-    private static final int SECONDS_SYNC_CHECK = 5;
-    private static final double SYNCS_PERDEVICE_PER_MINUTE =1d / SYNC_INTERVAL_MINS;
+
     private static int noSyncChecks = 0;
     private static LocalDateTime lastSync = null;
     private static LocalDateTime lastSyncCheck = null;
     protected static boolean triggerSynchroNeeded(int activeDevices){
+        double syncs_perdevice_per_min =1d / config.sync_interval_mins;
+
+
         //We check only once every N seconds
-        if (lastSyncCheck != null && !LocalDateTime.now().isAfter(lastSyncCheck.plusSeconds(SECONDS_SYNC_CHECK))){
+        if (lastSyncCheck != null && !LocalDateTime.now().isAfter(lastSyncCheck.plusSeconds(config.seconds_sync_check))){
             return false;
         }
         lastSyncCheck = LocalDateTime.now();
         //First check that there are sync slots available
-        if (synchroSlots != null && synchroSlots.size() == MAX_SYNCS ){
+        if (synchroSlotsN != null && synchroSlotsN.size() == config.max_syncs ){
             Boolean avail = false;
-            for (Boolean inAvail:synchroSlots){
+            for (Boolean inAvail:synchroSlotsN){
                 avail = inAvail;
                 if (avail){
                     break;
@@ -263,9 +273,9 @@ public class MyOrdersStressTest {
         //indicate if a sync will be needed
 
         //Determine the chance of a sync given the check interval
-        double checksPerMinute = Math.divideExact(60,SECONDS_SYNC_CHECK);
+        double checksPerMinute = Math.divideExact(60,config.seconds_sync_check);
         //Calculate chance per each check
-        double chancePerCheck = activeDevices * SYNCS_PERDEVICE_PER_MINUTE / checksPerMinute;
+        double chancePerCheck = activeDevices * syncs_perdevice_per_min / checksPerMinute;
         //And now adjust the chance taking into account how many previous failed checks
         //we had (eventually chance converges to 100%)
         double currentChance = noSyncChecks != 0 ? chancePerCheck * noSyncChecks:chancePerCheck;
@@ -295,12 +305,12 @@ public class MyOrdersStressTest {
         finalReadResultStats.put("Total", 0);
         //Here we read hope and message as well as write for each article
         final Semaphore parallelUpdatesSemaphore = new Semaphore(parallelUpdates);
-        //TODO remove test (Start)
+        /*remove test (Start)
         peformSynchronization();
         if (1 < 2){
             return;
         }
-        //TODO remove test (End)
+        remove test (End)*/
         for (int j=0;j < cycles;j++) {
             CountDownLatch waitForAll = new CountDownLatch(count);
             for (int i = 0; i < count; i++) {
@@ -637,16 +647,16 @@ public class MyOrdersStressTest {
     protected static int getUpdateType() {
         Random rand = new Random();
         int chance = rand.nextInt(100);
-        if (chance > 20) {
+        if (chance < config.order_chance) {
             return 0; //order is the most likely case
         }else{
-            if (chance < 10){
+            if (chance <  config.order_chance + config.stock_chance ){
                 //Stock
                 return 1;
-            }else if(chance < 15){
+            }else if(chance < config.order_chance + config.stock_chance + config.minrayon_chance ){
                 //Min Rayon
                 return 2;
-            }else if (chance < 17){
+            }else if (chance < config.order_chance + config.stock_chance + config.minrayon_chance + config.inassort_chance){
                 //In Asort
                 return 3;
             }else{
@@ -654,7 +664,6 @@ public class MyOrdersStressTest {
                 return 4;
             }
         }
-//        return 0;//Todo remove
     }
 
     private static void updateOrderDetails(OdataClient client, Map<String, Object> data, String field) {
@@ -821,7 +830,24 @@ public class MyOrdersStressTest {
             throw new RuntimeException(e);
         }
     }
-
+    public static ConfigsFile readConfigFile() {
+        //File is located in a subdirectory on the same folder as the executable.jar file
+        String path = getCurrentDirectory().concat(FOLDER_AND_FILE_CONFIG);
+        try {
+            File file = new File(path);
+            Scanner reader = new Scanner(file);
+            String jsonRaw = "";
+            while (reader.hasNextLine()) {
+                jsonRaw = jsonRaw.concat(reader.nextLine());
+            }
+            reader.close();
+            return ConfigsFile.getInstance(jsonRaw);
+        } catch (FileNotFoundException e) {
+            System.out.println("An error occurred.");
+            e.printStackTrace();
+        }
+        return null;
+    }
     public static TokensFile readTokenFile() {
         //File is located in a subdirectory on the same folder as the executable.jar file
         String path = getCurrentDirectory().concat(FOLDER_AND_FILE_TOKEN);
