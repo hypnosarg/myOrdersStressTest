@@ -140,7 +140,7 @@ public class MyOrdersStressTest {
                                 client = new OdataClient(params.serviceUrl, params.user, params.password);
                             }
                             client.enableJson(true);
-                            performSingleDeviceSimulationNew(params.totalUpdatesPerDevice, testCases, client, params.parallelUpdates, readMessagesAndNotes, performReads, deviceNo,params.cycles,params.activeDeviceCount);
+                            performSingleDeviceSimulationNew(params.totalUpdatesPerDevice, testCases, client, params.parallelUpdates, readMessagesAndNotes, performReads, deviceNo, params.cycles, params.activeDeviceCount);
                         } catch (Exception e) {
 
                         }
@@ -190,16 +190,17 @@ public class MyOrdersStressTest {
     protected static final int SYNCHRO_RELEASE_DELAY = 30;
     protected static ArrayList<Boolean> synchroSlotsN;
     protected static ScheduledThreadPoolExecutor releaseExecutorN;
-     final static ScheduledThreadPoolExecutor syncStartDelayer = new ScheduledThreadPoolExecutor(1);
-     final static Semaphore startSyncSem = new Semaphore(1);
-    private static void peformSynchronization(){
+    final static ScheduledThreadPoolExecutor syncStartDelayer = new ScheduledThreadPoolExecutor(1);
+    final static Semaphore startSyncSem = new Semaphore(1);
+
+    private static void peformSynchronization() {
         try {
             startSyncSem.acquire();
         } catch (InterruptedException e) {
             return;
         }
 
-        if (synchroSlotsN == null || releaseExecutorN == null ) {
+        if (synchroSlotsN == null || releaseExecutorN == null) {
             synchroSlotsN = new ArrayList<>(config.max_syncs);
             releaseExecutorN = new ScheduledThreadPoolExecutor(config.max_syncs);
         }
@@ -208,21 +209,21 @@ public class MyOrdersStressTest {
         //Get a device that is ready;
         //Find a slot
         int deviceNo = 1;
-        for ( deviceNo=1;deviceNo <= config.max_syncs;deviceNo++){
+        for (deviceNo = 1; deviceNo <= config.max_syncs; deviceNo++) {
 
-          try {
-              Boolean available = synchroSlotsN.get(deviceNo-1);
-              if (available) {
-                  synchroSlotsN.set(deviceNo - 1, false);
-                  break;
-              }
-          } catch (RuntimeException ex){
-              synchroSlotsN.add(deviceNo - 1, false);
-              break;
-          }
+            try {
+                Boolean available = synchroSlotsN.get(deviceNo - 1);
+                if (available) {
+                    synchroSlotsN.set(deviceNo - 1, false);
+                    break;
+                }
+            } catch (RuntimeException ex) {
+                synchroSlotsN.add(deviceNo - 1, false);
+                break;
+            }
         }
 
-        path = path.replace("#",String.valueOf(deviceNo));
+        path = path.replace("#", String.valueOf(deviceNo));
         path = "cmd /c start ".concat(path);
         try {
             Runtime.
@@ -233,13 +234,12 @@ public class MyOrdersStressTest {
         }
         //Wait 30 seconds to release the sync slot
         final int releaseSlot = deviceNo - 1;
-        releaseExecutorN.schedule(()->{
+        releaseExecutorN.schedule(() -> {
             synchroSlotsN.set(releaseSlot, false);
-        },SYNCHRO_RELEASE_DELAY,TimeUnit.SECONDS);
-        syncStartDelayer.schedule(()->{
-                startSyncSem.release();
-        },1,TimeUnit.SECONDS);
-
+        }, SYNCHRO_RELEASE_DELAY, TimeUnit.SECONDS);
+        syncStartDelayer.schedule(() -> {
+            startSyncSem.release();
+        }, 1, TimeUnit.SECONDS);
 
 
     }
@@ -247,25 +247,26 @@ public class MyOrdersStressTest {
     private static int noSyncChecks = 0;
     private static LocalDateTime lastSync = null;
     private static LocalDateTime lastSyncCheck = null;
-    protected static boolean triggerSynchroNeeded(int activeDevices){
-        double syncs_perdevice_per_min =1d / config.sync_interval_mins;
+
+    protected static boolean triggerSynchroNeeded(int activeDevices) {
+        double syncs_perdevice_per_min = 1d / config.sync_interval_mins;
 
 
         //We check only once every N seconds
-        if (lastSyncCheck != null && !LocalDateTime.now().isAfter(lastSyncCheck.plusSeconds(config.seconds_sync_check))){
+        if (lastSyncCheck != null && !LocalDateTime.now().isAfter(lastSyncCheck.plusSeconds(config.seconds_sync_check))) {
             return false;
         }
         lastSyncCheck = LocalDateTime.now();
         //First check that there are sync slots available
-        if (synchroSlotsN != null && synchroSlotsN.size() == config.max_syncs ){
+        if (synchroSlotsN != null && synchroSlotsN.size() == config.max_syncs) {
             Boolean avail = false;
-            for (Boolean inAvail:synchroSlotsN){
+            for (Boolean inAvail : synchroSlotsN) {
                 avail = inAvail;
-                if (avail){
+                if (avail) {
                     break;
                 }
             }
-            if (!avail){
+            if (!avail) {
                 return false;
             }
         }
@@ -273,22 +274,22 @@ public class MyOrdersStressTest {
         //indicate if a sync will be needed
 
         //Determine the chance of a sync given the check interval
-        double checksPerMinute = Math.divideExact(60,config.seconds_sync_check);
+        double checksPerMinute = Math.divideExact(60, config.seconds_sync_check);
         //Calculate chance per each check
         double chancePerCheck = activeDevices * syncs_perdevice_per_min / checksPerMinute;
         //And now adjust the chance taking into account how many previous failed checks
         //we had (eventually chance converges to 100%)
-        double currentChance = noSyncChecks != 0 ? chancePerCheck * noSyncChecks:chancePerCheck;
+        double currentChance = noSyncChecks != 0 ? chancePerCheck * noSyncChecks : chancePerCheck;
         //Convert to percentage
         currentChance = currentChance * 100;
         //And roll the dice!
         Random rand = new Random();
         int dice = rand.nextInt(100);
-        if (dice < currentChance){
+        if (dice < currentChance) {
             noSyncChecks = 0;
             lastSync = LocalDateTime.now();
             return true;
-        }else{
+        } else {
             noSyncChecks++;
             return false;
         }
@@ -311,17 +312,17 @@ public class MyOrdersStressTest {
             return;
         }
         remove test (End)*/
-        for (int j=0;j < cycles;j++) {
+        for (int j = 0; j < cycles; j++) {
             CountDownLatch waitForAll = new CountDownLatch(count);
             for (int i = 0; i < count; i++) {
                 //Randomly trigger synchronizations
-                if (triggerSynchroNeeded(totalDevices)){
+                if (triggerSynchroNeeded(totalDevices)) {
                     peformSynchronization();
                 }
                 new Thread(() -> {
                     //Randomize the update case to be done
                     int updType = getUpdateType();
-                    MyOrdersTestCases.TestData testData = getDataForTest(cases, updType,false);
+                    MyOrdersTestCases.TestData testData = getDataForTest(cases, updType, false);
                     Map<String, Object> data = client.getPropertiesOfEntitySet("OrderQuantitySet");
                     int oldQuantity = Integer.parseInt(testData.EXISTINGQTY.trim());
                     data.put("Hope", testData.HOPE);
@@ -649,17 +650,17 @@ public class MyOrdersStressTest {
         int chance = rand.nextInt(100);
         if (chance < config.order_chance) {
             return 0; //order is the most likely case
-        }else{
-            if (chance <  config.order_chance + config.stock_chance ){
+        } else {
+            if (chance < config.order_chance + config.stock_chance) {
                 //Stock
                 return 1;
-            }else if(chance < config.order_chance + config.stock_chance + config.minrayon_chance ){
+            } else if (chance < config.order_chance + config.stock_chance + config.minrayon_chance) {
                 //Min Rayon
                 return 2;
-            }else if (chance < config.order_chance + config.stock_chance + config.minrayon_chance + config.inassort_chance){
+            } else if (chance < config.order_chance + config.stock_chance + config.minrayon_chance + config.inassort_chance) {
                 //In Asort
                 return 3;
-            }else{
+            } else {
                 //In Rao
                 return 4;
             }
@@ -708,6 +709,7 @@ public class MyOrdersStressTest {
 
         }
     }
+
     private static Map<String, Integer> performUpdates(OdataClient client, Map<String, Object> data, int updType) {
         Map<String, Integer> stats = new HashMap<>();
         ArrayList<Map<String, Object>> partData = new ArrayList<>();
@@ -744,8 +746,9 @@ public class MyOrdersStressTest {
         stats.put("Total", 1);
         return stats;
     }
+
     private static Map<String, Integer> performUpdates(OdataClient client, Map<String, Object> data) {
-        return performUpdates(client,data,getUpdateType());
+        return performUpdates(client, data, getUpdateType());
     }
 
     private static Map<String, Integer> getAdHocData(OdataClient client, String hope, String store, Date orderDate, String session) {
@@ -757,16 +760,28 @@ public class MyOrdersStressTest {
         CountDownLatch internalAwait = new CountDownLatch(threads);
         //Read the messages and notes for the article before posting the order
         new Thread(() -> {
-            readMessages.addAll(getMessagesForHope(client, hope, store, orderDate));
+            try {
+                readMessages.addAll(getMessagesForHope(client, hope, store, orderDate));
+            } catch (Exception ex) {
+                System.out.println("Exception during read ".concat(ex.getMessage()));
+            }
             internalAwait.countDown();
         }).start();
         new Thread(() -> {
-            readNotes.addAll(getNotesForHope(client, hope, store, orderDate, session));
+            try {
+                readNotes.addAll(getNotesForHope(client, hope, store, orderDate, session));
+            } catch (Exception ex) {
+                    System.out.println("Exception during read ".concat(ex.getMessage()));
+            }
             internalAwait.countDown();
         }).start();
 
         new Thread(() -> {
-            readPredictedOrders.addAll(getPredictedSalesForHope(client, hope, store, orderDate));
+            try {
+                readPredictedOrders.addAll(getPredictedSalesForHope(client, hope, store, orderDate));
+            } catch (Exception ex) {
+                System.out.println("Exception during read ".concat(ex.getMessage()));
+            }
             internalAwait.countDown();
         }).start();
         int total = readMessages.size() + readNotes.size() + readPredictedOrders.size();
@@ -830,6 +845,7 @@ public class MyOrdersStressTest {
             throw new RuntimeException(e);
         }
     }
+
     public static ConfigsFile readConfigFile() {
         //File is located in a subdirectory on the same folder as the executable.jar file
         String path = getCurrentDirectory().concat(FOLDER_AND_FILE_CONFIG);
@@ -848,6 +864,7 @@ public class MyOrdersStressTest {
         }
         return null;
     }
+
     public static TokensFile readTokenFile() {
         //File is located in a subdirectory on the same folder as the executable.jar file
         String path = getCurrentDirectory().concat(FOLDER_AND_FILE_TOKEN);
