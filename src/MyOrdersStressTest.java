@@ -237,7 +237,8 @@ public class MyOrdersStressTest {
         synchroSlotsCount.add(deviceNo - 1, selectedCount + 1);
 
         path = path.replace("#", String.valueOf(deviceNo));
-        path = "cmd /c start ".concat(path);
+        String windowTitle = "SYNCHRO_".concat(String.valueOf(deviceNo));
+        path = "cmd /c start \"" + windowTitle + "\" " + path;
         try {
             Runtime.
                     getRuntime().
@@ -246,7 +247,7 @@ public class MyOrdersStressTest {
             throw new RuntimeException(e);
         }
         //Wait 30 seconds to release the sync slot
-        final String killCommand = "cmd /c taskkill /F /FI \"WindowTitle eq synchro".concat(String.valueOf(deviceNo))
+        final String killCommand = "cmd /c taskkill /F /FI \"WindowTitle eq ".concat(windowTitle)
                 .concat("\" /T");
         final int releaseSlot = selectedDevice - 1;
         releaseExecutorN.schedule(() -> {
