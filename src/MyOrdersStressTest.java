@@ -32,6 +32,7 @@ public class MyOrdersStressTest {
     public static final String FOLDER_AND_FILE_TOKEN = "\\testCases\\tokens.json";
     public static final String FOLDER_AND_FILE_CONFIG = "\\testCases\\config.json";
     public static final String FOLDER_AND_FILE_SYNC = "\\testCases\\device_#\\tech_download_volatile.BAT";
+    public static final String FOLDER_AND_FILE_SYNC_KILL = "\\testCases\\device_#\\killsync.BAT";
     public static final String EMPTY_MODIFICATION_TST = "0 ";
     private static final int DEVICES_PER_STORE = 5;
     private static final int MAX_PARALLEL_UPDATES = 4;
@@ -177,6 +178,7 @@ public class MyOrdersStressTest {
         System.out.println(params.activeDeviceCount + " Main threads triggered. Waiting for all processes to finish");
         mainThreadsBarrier.await();
         System.out.println(" All threads done!");
+        System.out.println(" Synchronization count: ".concat(String.valueOf(syncCount)));
 
 
     }
@@ -193,7 +195,7 @@ public class MyOrdersStressTest {
     protected static ScheduledThreadPoolExecutor releaseExecutorN;
     final static ScheduledThreadPoolExecutor syncStartDelayer = new ScheduledThreadPoolExecutor(1);
     final static Semaphore startSyncSem = new Semaphore(1);
-
+    protected static int syncCount = 0;
     private static void peformSynchronization() {
         try {
             startSyncSem.acquire();
@@ -230,7 +232,7 @@ public class MyOrdersStressTest {
                 break;
             }
         }
-
+        syncCount++;
         synchroSlotsN.add(selectedDevice - 1, false);
         synchroSlotsCount.add(deviceNo - 1, selectedCount + 1);
 
@@ -244,8 +246,19 @@ public class MyOrdersStressTest {
             throw new RuntimeException(e);
         }
         //Wait 30 seconds to release the sync slot
+        final String killCommand = "cmd /c taskkill /F /FI \"WindowTitle eq synchro".concat(String.valueOf(deviceNo))
+                .concat("\" /T");
         final int releaseSlot = selectedDevice - 1;
         releaseExecutorN.schedule(() -> {
+            //Kill the window task
+            try {
+                Runtime.
+                        getRuntime().
+                        exec(killCommand);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+
             synchroSlotsN.set(releaseSlot, true);
         }, SYNCHRO_RELEASE_DELAY, TimeUnit.SECONDS);
         syncStartDelayer.schedule(() -> {
