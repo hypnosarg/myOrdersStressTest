@@ -442,7 +442,7 @@ public class MyOrdersStressTest {
                 break;
             case 3:
                 //In Assort
-                testCases = cases.getArticlesForInAssort(flagUsed, 1, true);
+                testCases = cases.getArticlesForInAssort(true, 1, true);
                 break;
             case 4:
                 //In Rao
