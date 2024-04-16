@@ -189,6 +189,7 @@ public class MyOrdersStressTest {
     private static final Semaphore getCases = new Semaphore(1);
     protected static final int SYNCHRO_RELEASE_DELAY = 30;
     protected static ArrayList<Boolean> synchroSlotsN;
+    protected static ArrayList<Integer> synchroSlotsCount;
     protected static ScheduledThreadPoolExecutor releaseExecutorN;
     final static ScheduledThreadPoolExecutor syncStartDelayer = new ScheduledThreadPoolExecutor(1);
     final static Semaphore startSyncSem = new Semaphore(1);
@@ -202,6 +203,7 @@ public class MyOrdersStressTest {
 
         if (synchroSlotsN == null || releaseExecutorN == null) {
             synchroSlotsN = new ArrayList<>(config.max_syncs);
+            synchroSlotsCount = new ArrayList<>(config.max_syncs);
             releaseExecutorN = new ScheduledThreadPoolExecutor(config.max_syncs);
         }
 
@@ -209,19 +211,28 @@ public class MyOrdersStressTest {
         //Get a device that is ready;
         //Find a slot
         int deviceNo = 1;
+        int selectedCount = 0;
+        int selectedDevice = 0;
         for (deviceNo = 1; deviceNo <= config.max_syncs; deviceNo++) {
 
             try {
                 Boolean available = synchroSlotsN.get(deviceNo - 1);
                 if (available) {
-                    synchroSlotsN.set(deviceNo - 1, false);
-                    break;
+                    int internalCount = synchroSlotsCount.get(deviceNo - 1);
+                    if (internalCount < selectedCount){
+                        selectedCount = internalCount;
+                        selectedDevice = deviceNo;
+                    }
                 }
             } catch (RuntimeException ex) {
-                synchroSlotsN.add(deviceNo - 1, false);
+                selectedCount = 0;
+                selectedDevice = deviceNo;
                 break;
             }
         }
+
+        synchroSlotsN.add(selectedDevice - 1, false);
+        synchroSlotsCount.add(deviceNo - 1, selectedCount + 1);
 
         path = path.replace("#", String.valueOf(deviceNo));
         path = "cmd /c start ".concat(path);
@@ -233,13 +244,13 @@ public class MyOrdersStressTest {
             throw new RuntimeException(e);
         }
         //Wait 30 seconds to release the sync slot
-        final int releaseSlot = deviceNo - 1;
+        final int releaseSlot = selectedDevice - 1;
         releaseExecutorN.schedule(() -> {
-            synchroSlotsN.set(releaseSlot, false);
+            synchroSlotsN.set(releaseSlot, true);
         }, SYNCHRO_RELEASE_DELAY, TimeUnit.SECONDS);
         syncStartDelayer.schedule(() -> {
             startSyncSem.release();
-        }, 1, TimeUnit.SECONDS);
+        }, 3, TimeUnit.SECONDS);
 
 
     }
