@@ -200,8 +200,12 @@ public class MyOrdersStressTest {
         try {
             startSyncSem.acquire();
         } catch (InterruptedException e) {
+            startSyncSem.release();
             return;
         }
+        syncStartDelayer.schedule(() -> {
+            startSyncSem.release();
+        }, 3, TimeUnit.SECONDS);
 
         if (synchroSlotsN == null || releaseExecutorN == null) {
             synchroSlotsN = new ArrayList<>(config.max_syncs);
@@ -212,16 +216,15 @@ public class MyOrdersStressTest {
         String path = getCurrentDirectory().concat(FOLDER_AND_FILE_SYNC);
         //Get a device that is ready;
         //Find a slot
-        int deviceNo = 1;
-        int selectedCount = 0;
+        int selectedCount = 99999;
         int selectedDevice = 0;
-        for (deviceNo = 1; deviceNo <= config.max_syncs; deviceNo++) {
+        for (var deviceNo = 1; deviceNo <= config.max_syncs; deviceNo++) {
 
             try {
                 Boolean available = synchroSlotsN.get(deviceNo - 1);
                 if (available) {
                     int internalCount = synchroSlotsCount.get(deviceNo - 1);
-                    if (internalCount < selectedCount){
+                    if (internalCount <= selectedCount){
                         selectedCount = internalCount;
                         selectedDevice = deviceNo;
                     }
@@ -229,15 +232,19 @@ public class MyOrdersStressTest {
             } catch (RuntimeException ex) {
                 selectedCount = 0;
                 selectedDevice = deviceNo;
+                synchroSlotsN.add(selectedDevice - 1, false);
+                synchroSlotsCount.add(deviceNo - 1, selectedCount + 1);
                 break;
             }
         }
         syncCount++;
-        synchroSlotsN.add(selectedDevice - 1, false);
-        synchroSlotsCount.add(deviceNo - 1, selectedCount + 1);
+        if (synchroSlotsN.size() == config.max_syncs) {
+            synchroSlotsN.set(selectedDevice - 1, false);
+            synchroSlotsCount.set(selectedDevice - 1, selectedCount + 1);
+        }
 
-        path = path.replace("#", String.valueOf(deviceNo));
-        String windowTitle = "SYNCHRO_".concat(String.valueOf(deviceNo));
+        path = path.replace("#", String.valueOf(selectedDevice));
+        String windowTitle = "SYNCHRO_".concat(String.valueOf(selectedDevice));
         path = "cmd /c start \"" + windowTitle + "\" " + path;
         try {
             Runtime.
@@ -250,6 +257,10 @@ public class MyOrdersStressTest {
         final String killCommand = "cmd /c taskkill /F /FI \"WindowTitle eq ".concat(windowTitle)
                 .concat("\" /T");
         final int releaseSlot = selectedDevice - 1;
+
+
+
+
         releaseExecutorN.schedule(() -> {
             //Kill the window task
             try {
@@ -262,9 +273,6 @@ public class MyOrdersStressTest {
 
             synchroSlotsN.set(releaseSlot, true);
         }, SYNCHRO_RELEASE_DELAY, TimeUnit.SECONDS);
-        syncStartDelayer.schedule(() -> {
-            startSyncSem.release();
-        }, 3, TimeUnit.SECONDS);
 
 
     }
@@ -272,13 +280,19 @@ public class MyOrdersStressTest {
     private static int noSyncChecks = 0;
     private static LocalDateTime lastSync = null;
     private static LocalDateTime lastSyncCheck = null;
-
+    private static Semaphore syncCheckSemaphore = new Semaphore(1);
     protected static boolean triggerSynchroNeeded(int activeDevices) {
         double syncs_perdevice_per_min = 1d / config.sync_interval_mins;
-
+        try {
+            syncCheckSemaphore.acquire();
+        } catch (InterruptedException e) {
+            syncCheckSemaphore.release();
+            return false;
+        }
 
         //We check only once every N seconds
         if (lastSyncCheck != null && !LocalDateTime.now().isAfter(lastSyncCheck.plusSeconds(config.seconds_sync_check))) {
+            syncCheckSemaphore.release();
             return false;
         }
         lastSyncCheck = LocalDateTime.now();
@@ -292,6 +306,7 @@ public class MyOrdersStressTest {
                 }
             }
             if (!avail) {
+                syncCheckSemaphore.release();
                 return false;
             }
         }
@@ -313,18 +328,18 @@ public class MyOrdersStressTest {
         if (dice < currentChance) {
             noSyncChecks = 0;
             lastSync = LocalDateTime.now();
+            syncCheckSemaphore.release();
             return true;
         } else {
             noSyncChecks++;
+            syncCheckSemaphore.release();
             return false;
         }
 
     }
-
     private static void performSingleDeviceSimulationNew(int count, MyOrdersTestCases cases, OdataClient client, int parallelUpdates, Boolean readMessagesAndNotes, Boolean fullReads,
                                                          int deviceNumber, int cycles, int totalDevices) {
         ArrayList<Map<String, Object>> allData = new ArrayList<>();
-
         final Map<String, Integer> finalReadResultStats = new HashMap<>();
         finalReadResultStats.put("Total", 0);
         final Map<String, Integer> finalUpdateResultStats = new HashMap<>();
@@ -340,11 +355,18 @@ public class MyOrdersStressTest {
         for (int j = 0; j < cycles; j++) {
             CountDownLatch waitForAll = new CountDownLatch(count);
             for (int i = 0; i < count; i++) {
-                //Randomly trigger synchronizations
+                CountDownLatch threadSyncLatch = new CountDownLatch(1);
+                try {
+                    parallelUpdatesSemaphore.acquire();
+                } catch (InterruptedException ex) {
+
+                }
+                //Chance-based trigger synchronizations
                 if (triggerSynchroNeeded(totalDevices)) {
                     peformSynchronization();
                 }
                 new Thread(() -> {
+                    threadSyncLatch.countDown();
                     //Randomize the update case to be done
                     int updType = getUpdateType();
                     MyOrdersTestCases.TestData testData = getDataForTest(cases, updType, false);
@@ -360,11 +382,7 @@ public class MyOrdersStressTest {
                     data.put("UpdatedFields", "OrderedQuantity");
                     data.put("Language", "FR");
 
-                    try {
-                        parallelUpdatesSemaphore.acquire();
-                    } catch (InterruptedException ex) {
 
-                    }
                     CyclicBarrier internalAwait = new CyclicBarrier(3);
                     //Adhoc data getter
                     new Thread(() -> {
@@ -411,11 +429,14 @@ public class MyOrdersStressTest {
                     } catch (InterruptedException | BrokenBarrierException e) {
 
                     }
-
                     parallelUpdatesSemaphore.release();
                     waitForAll.countDown();
                 }).start();
+                try {
+                    threadSyncLatch.await();
+                } catch (InterruptedException e) {
 
+                }
             }
 
             try {
