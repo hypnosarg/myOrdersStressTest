@@ -257,7 +257,7 @@ public class MyOrdersStressTest {
         final String killCommand = "cmd /c taskkill /F /FI \"WindowTitle eq ".concat(windowTitle)
                 .concat("\" /T");
 
-        final String killCommandAdmin = "cmd /c taskkill /F /FI \"WindowTitle eq Administrator ".concat(windowTitle)
+        final String killCommandAdmin = "cmd /c taskkill /F /FI \"WindowTitle eq Administrator:  ".concat(windowTitle)
                 .concat("\" /T");
 
 
