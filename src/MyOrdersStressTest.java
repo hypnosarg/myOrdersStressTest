@@ -256,10 +256,12 @@ public class MyOrdersStressTest {
         //Wait 30 seconds to release the sync slot
         final String killCommand = "cmd /c taskkill /F /FI \"WindowTitle eq ".concat(windowTitle)
                 .concat("\" /T");
+
+        final String killCommandAdmin = "cmd /c taskkill /F /FI \"WindowTitle eq Administrator ".concat(windowTitle)
+                .concat("\" /T");
+
+
         final int releaseSlot = selectedDevice - 1;
-
-
-
 
         releaseExecutorN.schedule(() -> {
             //Kill the window task
@@ -267,6 +269,10 @@ public class MyOrdersStressTest {
                 Runtime.
                         getRuntime().
                         exec(killCommand);
+                Runtime.
+                        getRuntime().
+                        exec(killCommandAdmin);
+
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
